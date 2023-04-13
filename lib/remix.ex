@@ -1,5 +1,6 @@
 defmodule Remix do
   use Application
+  require Logger
 
   # See http://elixir-lang.org/docs/stable/elixir/Application.html
   # for more information on OTP Applications
@@ -26,7 +27,8 @@ defmodule Remix do
     end
 
     def handle_info(:poll_and_reload, state) do
-      paths = Application.get_all_env(:remix)[:paths]
+      paths = Application.get_all_env(:remix)[:paths] || %{}
+      IO.inspect(paths, label: "poll and reload ==============")
 
       new_state =
         Map.new(paths, fn path ->
@@ -48,7 +50,16 @@ defmodule Remix do
     def handle_path(path, current_mtime, current_mtime), do: {path, current_mtime}
 
     def handle_path(path, current_mtime, _) do
-      comp_elixir = fn -> Mix.Tasks.Compile.Elixir.run(["--ignore-module-conflict"]) end
+      comp_elixir = fn ->
+        case Mix.Tasks.Compile.Elixir.run(["--ignore-module-conflict"]) do
+          {:error, _} ->
+            Logger.error("RECOMPILE ERROR!!!")
+
+          v ->
+            Logger.info("COMPILE SUCCESS !!!", ansi_color: :green)
+        end
+      end
+
       comp_escript = fn -> Mix.Tasks.Escript.Build.run([]) end
 
       case Application.get_all_env(:remix)[:silent] do
