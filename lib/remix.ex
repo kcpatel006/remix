@@ -50,13 +50,8 @@ defmodule Remix do
 
     def handle_path(path, current_mtime, _) do
       comp_elixir = fn ->
-        case Mix.Tasks.Compile.Elixir.run(["--ignore-module-conflict"]) do
-          {:error, _} ->
-            Logger.error("COMPILE ERROR!!!")
-
-          _ ->
-            Logger.info("COMPILE SUCCESS !!!", ansi_color: :green)
-        end
+        Mix.Tasks.Compile.Elixir.run(["--ignore-module-conflict"])
+        |> IO.inspect(label: "res ===============")
       end
 
       comp_escript = fn -> Mix.Tasks.Escript.Build.run([]) end
