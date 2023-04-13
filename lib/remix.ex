@@ -9,7 +9,7 @@ defmodule Remix do
 
     children = [
       # Define workers and child supervisors to be supervised
-      worker(Remix.Worker, [])
+      {Remix.Worker, []}
     ]
 
     # See http://elixir-lang.org/docs/stable/elixir/Supervisor.html
@@ -21,65 +21,58 @@ defmodule Remix do
   defmodule Worker do
     use GenServer
 
-    def start_link do
+    defmodule State, do: defstruct(last_mtime: nil)
+
+    def start_link(_) do
       Process.send_after(__MODULE__, :poll_and_reload, 10000)
-      GenServer.start_link(__MODULE__, %{}, name: Remix.Worker)
+      GenServer.start_link(__MODULE__, %State{}, name: Remix.Worker)
+    end
+
+    def init(state) do
+      {:ok, state}
     end
 
     def handle_info(:poll_and_reload, state) do
-      paths = Application.get_all_env(:remix)[:paths] || %{}
-      IO.inspect(paths, label: "poll and reload ==============")
+      current_mtime = get_current_mtime()
 
-      new_state =
-        Map.new(paths, fn path ->
-          current_mtime = get_current_mtime(path)
+      state =
+        if state.last_mtime != current_mtime do
+          comp_elixir = fn ->
+            case Mix.Tasks.Compile.Elixir.run([
+                   "--ignore-module-conflict",
+                   "--verbose",
+                   "--warnings-as-errors"
+                 ]) do
+              {:error, _} ->
+                Logger.error("COMPILE ERROR !!!")
 
-          last_mtime =
-            case Map.fetch(state, path) do
-              {:ok, val} -> val
-              :error -> nil
+              _ ->
+                Logger.info("COMPILE SUCCESS !!!", ansi_color: :green)
             end
 
-          handle_path(path, current_mtime, last_mtime)
-        end)
+            if Application.get_all_env(:remix)[:escript] == true do
+              Mix.Tasks.Escript.Build.run([])
+            end
+          end
+
+          case Application.get_all_env(:remix)[:silent] do
+            true ->
+              ExUnit.CaptureIO.capture_io(comp_elixir)
+
+            _ ->
+              comp_elixir.()
+          end
+
+          %State{last_mtime: current_mtime}
+        else
+          state
+        end
 
       Process.send_after(__MODULE__, :poll_and_reload, 1000)
-      {:noreply, new_state}
+      {:noreply, state}
     end
 
-    def handle_path(path, current_mtime, current_mtime), do: {path, current_mtime}
-
-    def handle_path(path, current_mtime, _) do
-      comp_elixir = fn ->
-        case Mix.Tasks.Compile.Elixir.run(["--ignore-module-conflict"]) do
-          {:error, _} ->
-            Logger.error("RECOMPILE ERROR!!!")
-
-          v ->
-            Logger.info("COMPILE SUCCESS !!!", ansi_color: :green)
-        end
-      end
-
-      comp_escript = fn -> Mix.Tasks.Escript.Build.run([]) end
-
-      case Application.get_all_env(:remix)[:silent] do
-        true ->
-          ExUnit.CaptureIO.capture_io(comp_elixir)
-
-          if Application.get_all_env(:remix)[:escript] == true do
-            ExUnit.CaptureIO.capture_io(comp_escript)
-          end
-
-        _ ->
-          comp_elixir.()
-
-          if Application.get_all_env(:remix)[:escript] == true do
-            comp_escript.()
-          end
-      end
-
-      {path, current_mtime}
-    end
+    def get_current_mtime, do: get_current_mtime("lib")
 
     def get_current_mtime(dir) do
       case File.ls(dir) do
